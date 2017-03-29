@@ -473,24 +473,28 @@ private:
             count = 0;
             index = bitset<4>(i);
             dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
-            for(int j=31; j>=4; j--)
+            xorResult = binary^dictionaryEntry;
+            if(xorResult.count() <= 4)
             {
-                for(int k=1; k<=15; k++)
+                for(int j=31; j>=4; j--)
                 {
-                    mask = bitset<4>(k);
-                    fullMask = bitset<32>(k);
-                    fullMask<<=(j-3);
-                    xorResult = binary^fullMask;
-                    if(xorResult==dictionaryEntry)
+                    for(int k=1; k<=15; k++)
                     {
-                        bitmask = mask.to_string();
-                        dictionaryIndex = index.to_string();
-                        locationBits = bitset<5>(count);
-                        location = locationBits.to_string();
-                        return true;
+                        mask = bitset<4>(k);
+                        fullMask = bitset<32>(k);
+                        fullMask<<=(j-3);
+                        xorResult = binary^fullMask;
+                        if(xorResult==dictionaryEntry)
+                        {
+                            bitmask = mask.to_string();
+                            dictionaryIndex = index.to_string();
+                            locationBits = bitset<5>(count);
+                            location = locationBits.to_string();
+                            return true;
+                        }
                     }
+                    count++;
                 }
-                count++;
             }
         }
         return false;
