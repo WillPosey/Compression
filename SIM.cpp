@@ -1,3 +1,5 @@
+/* On my honor, I have neither given nor received unauthorized aid on this assignment */
+
 /******************************************************
  *
  *  File:       SIM.cpp
@@ -28,10 +30,12 @@ using namespace std;
 struct DictionaryEntry
 {
     string binary;
+    int instrNum;
     int frequency;
     int index;
 
     DictionaryEntry() : binary("00000000000000000000000000000000"),
+                        instrNum(0),
                         frequency(1),
                         index(-1){};
 };
@@ -48,6 +52,22 @@ public:
         entryCount = 0;
     }
 
+    bool InDictionary(string check, string& index)
+    {
+        bitset<4> indexBits;
+        bool found = false;
+        for(int i=0; i<16; i++)
+        {
+            if(dictionaryContent[i].binary.compare(check) == 0)
+            {
+                found = true;
+                indexBits = bitset<4> (i);
+                index = indexBits.to_string();
+            }
+        }
+        return found;
+    }
+
     string GetEntry(string entryIndex)
     {
         bitset<4> index(entryIndex);
@@ -59,14 +79,16 @@ public:
     {
         string line;
         ifstream file (filename);
+        int instrNum = 0;
 
         if(filename.compare(COMPRESS_INPUT_FILENAME) == 0)
         {
             while(getline(file, line))
             {
+                instrNum++;
                 if(line.length() > 32)
                     line.erase(32,1);
-                AddInstance(line);
+                AddInstance(line, instrNum);
             }
         }
         else if(filename.compare(DECOMPRESS_INPUT_FILENAME) == 0)
@@ -94,7 +116,7 @@ public:
     }
 
     /**************************/
-    void AddInstance(string binary)
+    void AddInstance(string binary, int instrNum)
     {
         DictionaryEntry entry,temp;
         unordered_map<string,DictionaryEntry>::iterator it = entryMap.find(binary);
@@ -103,6 +125,7 @@ public:
         {
             entry.binary = binary;
             entry.frequency = 1;
+            entry.instrNum = instrNum;
             if(entryCount < 16)
             {
                 entry.index = entryCount;
@@ -118,6 +141,7 @@ public:
         {
             entry = entryMap[binary];
             int newFreq = entry.frequency + 1;
+            int instrNum = entry.instrNum;
             entry.frequency = newFreq;
 
             int index = entry.index;
@@ -133,7 +157,9 @@ public:
 
                 int i = index<0 ? entryCount-1 : index-1;
 
-                while(newFreq >= dictionaryContent[i].frequency && i>=0)
+                while(((newFreq > dictionaryContent[i].frequency) ||
+                      ((newFreq == dictionaryContent[i].frequency) && (instrNum < dictionaryContent[i].instrNum)))
+                      && i>=0)
                 {
                     numPassed++;
                     i--;
@@ -201,6 +227,7 @@ private:
 class Compression
 {
 public:
+    /**************************/
     void StartCompression()
     {
         d.CreateDictionary(COMPRESS_INPUT_FILENAME);
@@ -210,25 +237,345 @@ public:
     }
 
 private:
+    /**************************/
     void OpenFiles()
     {
         inputFile.open(COMPRESS_INPUT_FILENAME);
         outputFile.open(COMPRESS_OUTPUT_FILENAME);
     }
 
+    /**************************/
     void CloseFiles()
     {
         inputFile.close();
         outputFile.close();
     }
 
+    /**************************/
     void RunCompression()
     {
+        string line, compressedBinary;
+        bitset<32> binary;
+        bool isRLE;
 
+        fillLastLine = false;
+
+        while(getline(inputFile,line))
+        {
+            if(line.length() > 32)
+                line.erase(line.length()-1,1);
+            binary = bitset<32>(line);
+            compressedBinary = Compress(binary, isRLE);
+            if(!isRLE)
+                WriteOutput(compressedBinary);
+        }
+
+        fillLastLine = true;
+        WriteOutput("");
+
+        WriteDictionary();
+    }
+
+    /**************************/
+    string Compress(bitset<32> binary, bool& isRLE)
+    {
+        static bool firstBinary = true, lastRLE = false, ignoreRLE = false;
+        static bitset<32> lastBinary;
+        static int RLEcount = 0;
+        string compressed, dictionaryIndex, bitmask, location, location2;
+        bitset<3> rleBits;
+
+        isRLE = false;
+
+        if(!firstBinary && binary==lastBinary && !ignoreRLE)
+        {
+            RLEcount++;
+            lastRLE = true;
+            isRLE = true;
+        }
+        else if(DictionaryMatch(binary, dictionaryIndex))
+            compressed = "111" + dictionaryIndex;
+        else if(OneBitMismatch(binary, location, dictionaryIndex))
+            compressed = "011" + location + dictionaryIndex;
+        else if(TwoBitMismatch(binary, location, dictionaryIndex))
+            compressed = "100" + location + dictionaryIndex;
+        else if(FourBitMismatch(binary, location, dictionaryIndex))
+            compressed = "101" + location + dictionaryIndex;
+        else if(Bitmask(binary, location, bitmask, dictionaryIndex))
+            compressed = "010" + location + bitmask + dictionaryIndex;
+        else if(DoubleBitMismatch(binary, location, location2, dictionaryIndex))
+            compressed = "110" + location + location2 + dictionaryIndex;
+        else
+            compressed = "000" + binary.to_string();
+
+        firstBinary = false;
+        ignoreRLE = false;
+        lastBinary = binary;
+
+        if(isRLE)
+        {
+            if(RLEcount < 8)
+                compressed = "";
+            else
+            {
+                lastRLE = false;
+                rleBits = bitset<3>((RLEcount-1));
+                RLEcount = 0;
+                compressed = "001" + rleBits.to_string();
+                ignoreRLE = true;
+                isRLE = false;
+            }
+        }
+        else if(!isRLE && lastRLE)
+        {
+            lastRLE = false;
+            rleBits = bitset<3>((RLEcount-1));
+            RLEcount = 0;
+            compressed = "001" + rleBits.to_string() + compressed;
+        }
+
+        return compressed;
+    }
+
+    /**************************/
+    bool DictionaryMatch(bitset<32> binary, string& dictionaryIndex)
+    {
+        return d.InDictionary(binary.to_string(), dictionaryIndex);
+    }
+
+    /**************************/
+    bool OneBitMismatch(bitset<32> binary, string& location, string& dictionaryIndex)
+    {
+        bitset<4> index(0);
+        bitset<5> locationBits(0);
+        bitset<32> dictionaryEntry, xorResult;
+        int count = 0;
+
+        for(int i=0; i<16; i++)
+        {
+            index = bitset<4>(i);
+            dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
+            xorResult = binary^dictionaryEntry;
+            if(xorResult.count()==1)
+            {
+                for(int j=31; j>=0; j--)
+                {
+                    if(xorResult[j])
+                        break;
+                    count++;
+                }
+                dictionaryIndex = index.to_string();
+                locationBits = bitset<5>(count);
+                location = locationBits.to_string();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**************************/
+    bool TwoBitMismatch(bitset<32> binary, string& location, string& dictionaryIndex)
+    {
+        bitset<4> index(0);
+        bitset<5> locationBits(0);
+        bitset<32> dictionaryEntry, xorResult;
+        int count=0;
+
+        for(int i=0; i<16; i++)
+        {
+            index = bitset<4>(i);
+            dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
+            xorResult = binary^dictionaryEntry;
+            if(xorResult.count()==2)
+            {
+                for(int j=31; j>=1; j--)
+                {
+                    if(xorResult[j] && xorResult[j-1])
+                        break;
+                    else if(xorResult[j])
+                        return false;
+                    count++;
+                }
+                dictionaryIndex = index.to_string();
+                locationBits = bitset<5>(count);
+                location = locationBits.to_string();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**************************/
+    bool FourBitMismatch(bitset<32> binary, string& location, string& dictionaryIndex)
+    {
+        bitset<4> index(0);
+        bitset<5> locationBits(0);
+        bitset<32> dictionaryEntry, xorResult;
+        int count=0;
+
+        for(int i=0; i<16; i++)
+        {
+            index = bitset<4>(i);
+            dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
+            xorResult = binary^dictionaryEntry;
+            if(xorResult.count()==4)
+            {
+                for(int j=31; j>=1; j--)
+                {
+                    if(xorResult[j] && xorResult[j-1] && xorResult[j-2] && xorResult[j-3])
+                        break;
+                    else if(xorResult[j])
+                        return false;
+                    count++;
+                }
+                dictionaryIndex = index.to_string();
+                locationBits = bitset<5>(count);
+                location = locationBits.to_string();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**************************/
+    bool Bitmask(bitset<32> binary, string& location, string& bitmask, string& dictionaryIndex)
+    {
+        bitset<4> index(0), mask;
+        bitset<5> locationBits(0);
+        bitset<32> dictionaryEntry, xorResult, fullMask;
+        int count=0;
+
+        for(int i=0; i<16; i++)
+        {
+            count = 0;
+            index = bitset<4>(i);
+            dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
+            for(int j=31; j>=4; j--)
+            {
+                for(int k=1; k<=15; k++)
+                {
+                    mask = bitset<4>(k);
+                    fullMask = bitset<32>(k);
+                    fullMask<<=(j-3);
+                    xorResult = binary^fullMask;
+                    if(xorResult==dictionaryEntry)
+                    {
+                        bitmask = mask.to_string();
+                        dictionaryIndex = index.to_string();
+                        locationBits = bitset<5>(count);
+                        location = locationBits.to_string();
+                        return true;
+                    }
+                }
+                count++;
+            }
+        }
+        return false;
+    }
+
+    /**************************/
+    bool DoubleBitMismatch(bitset<32> binary, string& location, string& location2, string& dictionaryIndex)
+    {
+        bitset<4> index(0);
+        bitset<5> locationBits(0), location2Bits(0);
+        bitset<32> dictionaryEntry, xorResult;
+        int numFound, count = 0, count2 = 0;
+
+        for(int i=0; i<16; i++)
+        {
+            index = bitset<4>(i);
+            dictionaryEntry = bitset<32>(d.GetEntry(index.to_string()));
+            xorResult = binary^dictionaryEntry;
+            if(xorResult.count()==2)
+            {
+                numFound = 0;
+                for(int j=31; j>=1; j--)
+                {
+                    if(xorResult[j])
+                    {
+                        numFound++;
+                        if(numFound==2)
+                            break;
+                    }
+                    count2++;
+                    if(numFound==0)
+                        count++;
+                }
+                dictionaryIndex = index.to_string();
+                locationBits = bitset<5>(count);
+                location = locationBits.to_string();
+                location2Bits = bitset<5>(count2);
+                location2 = location2Bits.to_string();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**************************/
+    void WriteOutput(string compressedBinary)
+    {
+        static int outputCount = 0;
+        int newOutputCount = outputCount + compressedBinary.length();
+        int space = 32- outputCount;
+        int nextLine = compressedBinary.length()-space;
+
+        if(fillLastLine)
+        {
+            //
+            //outputFile << " ";
+            //
+
+            for(int i=outputCount; i<32; i++)
+                outputFile << "0";
+            outputFile << "\r\n";
+        }
+        else if(newOutputCount > 32)
+        {
+            outputFile << compressedBinary.substr(0,space) << "\r\n";
+            if(nextLine <= 32)
+            {
+                outputFile << compressedBinary.substr(space, nextLine);
+                outputCount = (nextLine==32) ? 0 : nextLine;
+            }
+            else
+            {
+                outputFile << compressedBinary.substr(space, 32) << "\r\n";
+                outputFile << compressedBinary.substr(space+32, nextLine-32);
+                outputCount = nextLine-32;
+            }
+
+            //
+            //outputFile << " ";
+            //
+
+            if(outputCount > 32)
+                cout << "output Count: " << outputCount << " length: " << compressedBinary.length() << " space: " << space << endl;
+        }
+        else
+        {
+            outputFile << compressedBinary;
+
+            //
+            //outputFile << " ";
+            //
+
+            if(newOutputCount == 32)
+                outputFile << "\r\n";
+            outputCount = (newOutputCount==32) ? 0 : newOutputCount;
+        }
+    }
+
+    /**************************/
+    void WriteDictionary()
+    {
+        outputFile << "xxxx" << "\r\n";
+        outputFile << d.GetDictionary() << "\r\n";
     }
 
     ifstream inputFile;
     ofstream outputFile;
+    bool fillLastLine;
     Dictionary d;
 };
 
