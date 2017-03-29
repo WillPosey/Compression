@@ -87,7 +87,7 @@ public:
             {
                 instrNum++;
                 if(line.length() > 32)
-                    line.erase(32,1);
+                    line.erase(32,line.length()-32);
                 AddInstance(line, instrNum);
             }
         }
@@ -101,13 +101,12 @@ public:
                 if(foundDictionary)
                 {
                     if(line.length() > 32)
-                        line.erase(line.length()-1,1);
+                        line.erase(32,line.length()-32);
                     dictionaryContent[index++].binary = line;
                 }
                 else
                 {
-                    line.erase(line.length()-1,1);
-                    if(line.compare("xxxx") == 0)
+                    if(line.find("xxxx") != string::npos)
                         foundDictionary = true;
                 }
             }
@@ -263,7 +262,7 @@ private:
         while(getline(inputFile,line))
         {
             if(line.length() > 32)
-                line.erase(line.length()-1,1);
+                line.erase(32,line.length()-32);
             binary = bitset<32>(line);
             compressedBinary = Compress(binary, isRLE);
             if(!isRLE)
@@ -380,6 +379,7 @@ private:
         bitset<5> locationBits(0);
         bitset<32> dictionaryEntry, xorResult;
         int count=0;
+        bool found;
 
         for(int i=0; i<16; i++)
         {
@@ -388,18 +388,29 @@ private:
             xorResult = binary^dictionaryEntry;
             if(xorResult.count()==2)
             {
+                found = false;
+                count = 0;
                 for(int j=31; j>=1; j--)
                 {
                     if(xorResult[j] && xorResult[j-1])
+                    {
+                        found = true;
                         break;
+                    }
                     else if(xorResult[j])
-                        return false;
+                    {
+                        found = false;
+                        break;
+                    }
                     count++;
                 }
-                dictionaryIndex = index.to_string();
-                locationBits = bitset<5>(count);
-                location = locationBits.to_string();
-                return true;
+                if(found)
+                {
+                    dictionaryIndex = index.to_string();
+                    locationBits = bitset<5>(count);
+                    location = locationBits.to_string();
+                    return true;
+                }
             }
         }
         return false;
@@ -412,6 +423,7 @@ private:
         bitset<5> locationBits(0);
         bitset<32> dictionaryEntry, xorResult;
         int count=0;
+        bool found;
 
         for(int i=0; i<16; i++)
         {
@@ -420,18 +432,29 @@ private:
             xorResult = binary^dictionaryEntry;
             if(xorResult.count()==4)
             {
+                found = false;
+                count = 0;
                 for(int j=31; j>=1; j--)
                 {
                     if(xorResult[j] && xorResult[j-1] && xorResult[j-2] && xorResult[j-3])
+                    {
+                        found = true;
                         break;
+                    }
                     else if(xorResult[j])
-                        return false;
+                    {
+                        found = false;
+                        break;
+                    }
                     count++;
                 }
-                dictionaryIndex = index.to_string();
-                locationBits = bitset<5>(count);
-                location = locationBits.to_string();
-                return true;
+                if(found)
+                {
+                    dictionaryIndex = index.to_string();
+                    locationBits = bitset<5>(count);
+                    location = locationBits.to_string();
+                    return true;
+                }
             }
         }
         return false;
@@ -522,10 +545,6 @@ private:
 
         if(fillLastLine)
         {
-            //
-            //outputFile << " ";
-            //
-
             for(int i=outputCount; i<32; i++)
                 outputFile << "0";
             outputFile << "\r\n";
@@ -545,21 +564,12 @@ private:
                 outputCount = nextLine-32;
             }
 
-            //
-            //outputFile << " ";
-            //
-
             if(outputCount > 32)
                 cout << "output Count: " << outputCount << " length: " << compressedBinary.length() << " space: " << space << endl;
         }
         else
         {
             outputFile << compressedBinary;
-
-            //
-            //outputFile << " ";
-            //
-
             if(newOutputCount == 32)
                 outputFile << "\r\n";
             outputCount = (newOutputCount==32) ? 0 : newOutputCount;
